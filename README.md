@@ -46,7 +46,19 @@ This system addresses five key expectations:
    cd flight-scheduling-analysis
    ```
 
-2. **Set up environment**
+2. **Install dependencies (Quick Fix)**
+   ```bash
+   # Quick fix for missing packages
+   python fix_imports.py
+   
+   # Or install from requirements
+   pip install -r requirements.txt
+   
+   # Or use the comprehensive installer
+   python install_dependencies.py
+   ```
+
+3. **Set up environment**
    ```bash
    # Copy environment template
    cp .env.example .env
