@@ -93,3 +93,6 @@ models/
 
 # Logs
 *.log
+
+# Kiro IDE specs and configuration
+.kiro/specs/flight-scheduling-analysis/
