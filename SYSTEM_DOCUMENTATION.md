@@ -761,7 +761,7 @@ The system supports natural language queries for intuitive data exploration:
 
 **Example Queries:**
 - "What are the busiest hours at Mumbai airport?"
-- "Show me delay patterns for Air India flights last week"
+- "Show me delay patterns for flights last week"
 - "Which flights cause the most cascading delays?"
 - "What's the best time to schedule a flight from Delhi to Mumbai?"
 - "Compare congestion between Mumbai and Delhi airports"

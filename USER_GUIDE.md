@@ -289,7 +289,7 @@ The system includes an AI-powered natural language interface that allows you to 
 **Route Analysis**:
 - "What's the best time to fly from Mumbai to Delhi?"
 - "Which route has the most delays?"
-- "Compare Air India vs IndiGo performance"
+- "Compare airline performance between different carriers"
 - "Show me the most reliable flights"
 
 **Network Analysis**:

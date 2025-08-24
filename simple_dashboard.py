@@ -78,7 +78,7 @@ def show_delay_analysis():
     with col1:
         airport = st.selectbox("Airport", ["Mumbai (BOM)", "Delhi (DEL)", "Bangalore (BLR)"])
     with col2:
-        airline = st.selectbox("Airline", ["All", "Air India", "IndiGo", "SpiceJet"])
+        airline = st.selectbox("Airline", ["All Airlines"])
     with col3:
         days = st.slider("Days Back", 1, 90, 30)
     

@@ -483,10 +483,10 @@ def insert_sample_data():
         
         # Sample airlines
         airlines = [
-            {'code': 'AI', 'name': 'Air India', 'country': 'India'},
-            {'code': '6E', 'name': 'IndiGo', 'country': 'India'},
-            {'code': 'SG', 'name': 'SpiceJet', 'country': 'India'},
-            {'code': 'UK', 'name': 'Vistara', 'country': 'India'}
+            {'code': 'AA', 'name': 'Airline A', 'country': 'India'},
+            {'code': 'AB', 'name': 'Airline B', 'country': 'India'},
+            {'code': 'AC', 'name': 'Airline C', 'country': 'India'},
+            {'code': 'AD', 'name': 'Airline D', 'country': 'India'}
         ]
         
         for airline_data in airlines:

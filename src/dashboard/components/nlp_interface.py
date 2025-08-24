@@ -15,7 +15,7 @@ class QueryValidator:
     
     def __init__(self):
         self.valid_airports = ['BOM', 'DEL', 'BLR', 'MAA', 'CCU', 'HYD', 'AMD', 'COK']
-        self.valid_airlines = ['Air India', 'IndiGo', 'SpiceJet', 'Vistara', 'GoAir', 'AirAsia India']
+        self.valid_airlines = ['Airline A', 'Airline B', 'Airline C', 'Airline D', 'Airline E', 'Airline F']
         self.query_patterns = {
             'delay_analysis': [
                 r'delay', r'late', r'on.?time', r'punctual'

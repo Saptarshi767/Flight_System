@@ -96,3 +96,6 @@ models/
 
 # Kiro IDE specs and configuration
 .kiro/specs/flight-scheduling-analysis/
+
+# Presentation content
+Flight_Analysis_Presentation_Content.md

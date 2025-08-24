@@ -106,7 +106,7 @@ async def nlp_root():
                 "What's the best time to fly from Mumbai to Delhi?",
                 "Which flights cause the most delays?",
                 "Show me congestion patterns for BOM airport",
-                "What's the average delay for Air India flights?",
+                "What's the average delay for flights?",
                 "Which time slots should I avoid at Delhi airport?"
             ]
         }

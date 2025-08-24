@@ -179,7 +179,7 @@ def create_airline_delay_comparison(data: Optional[pd.DataFrame] = None) -> go.F
     
     if data is None:
         # Generate sample data
-        airlines = ['Air India', 'IndiGo', 'SpiceJet', 'Vistara', 'GoAir', 'AirAsia India']
+        airlines = ['Airline A', 'Airline B', 'Airline C', 'Airline D', 'Airline E', 'Airline F']
         
         # Generate realistic delay patterns for each airline
         airline_data = []

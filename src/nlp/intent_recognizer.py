@@ -217,12 +217,12 @@ class FlightIntentRecognizer:
         
         # Common airline mappings
         self.airline_mappings = {
-            'air india': 'AI',
-            'indigo': '6E',
-            'spicejet': 'SG',
-            'vistara': 'UK',
-            'go air': 'G8',
-            'akasa air': 'QP',
+            'airline a': 'AA',
+            'airline b': 'AB',
+            'airline c': 'AC',
+            'airline d': 'AD',
+            'airline e': 'AE',
+            'airline f': 'AF',
             'emirates': 'EK',
             'qatar airways': 'QR',
             'singapore airlines': 'SQ',

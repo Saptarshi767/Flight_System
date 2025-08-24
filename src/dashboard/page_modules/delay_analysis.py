@@ -28,7 +28,7 @@ def show():
         col1, col2 = st.columns(2)
         
         with col1:
-            airline = st.selectbox("Airline", ["All", "Air India", "IndiGo", "SpiceJet", "Vistara"])
+            airline = st.selectbox("Airline", ["All Airlines"])
         
         with col2:
             time_filter = st.selectbox("Time Period", ["All Day", "Morning (6-12)", "Afternoon (12-18)", "Evening (18-24)"])
@@ -153,7 +153,7 @@ def show():
     recommendations = [
         "🕕 Consider scheduling more flights between 6-7 AM for minimal delays",
         "🌤️ Weather delays peak at 3-4 PM - avoid scheduling during thunderstorm season",
-        "✈️ Air India flights show 23% higher delays on Fridays - investigate crew scheduling",
+        "✈️ Flights show 23% higher delays on Fridays - investigate crew scheduling patterns",
         "🛫 Runway 09L at Mumbai shows congestion between 8-10 AM - redistribute traffic"
     ]
     

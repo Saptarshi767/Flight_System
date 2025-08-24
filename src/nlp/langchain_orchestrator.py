@@ -95,10 +95,10 @@ class FlightDataTool(BaseTool):
         
         # Extract airlines
         airline_keywords = {
-            'air india': 'AI',
-            'indigo': '6E',
-            'spicejet': 'SG',
-            'vistara': 'UK'
+            'airline a': 'AA',
+            'airline b': 'AB',
+            'airline c': 'AC',
+            'airline d': 'AD'
         }
         airlines = []
         for keyword, code in airline_keywords.items():
