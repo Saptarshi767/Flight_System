@@ -17,32 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"  # Collapse sidebar
 )
 
-def authenticate():
-    """Simple authentication"""
-    if 'authenticated' not in st.session_state:
-        st.session_state['authenticated'] = False
-    
-    if not st.session_state['authenticated']:
-        st.title("🔐 Flight Analysis Dashboard Login")
-        
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            login_btn = st.form_submit_button("Login")
-            
-            if login_btn:
-                if username in ['admin', 'operator', 'analyst'] and password in ['admin123', 'operator123', 'analyst123']:
-                    st.session_state['authenticated'] = True
-                    st.session_state['username'] = username
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
-        
-        st.info("Demo: admin/admin123, operator/operator123, analyst/analyst123")
-        return False
-    
-    return True
+# Authentication removed for public access
 
 def show_home():
     """Home page"""
@@ -161,12 +136,8 @@ def show_nlp_interface():
 def main():
     """Main application"""
     
-    # Authentication
-    if not authenticate():
-        return
-    
     # Top navigation
-    st.markdown(f"**Welcome, {st.session_state.get('username', 'User')}**")
+    st.markdown("**✈️ Flight Scheduling Analysis Dashboard**")
     
     col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 1])
     
@@ -194,9 +165,7 @@ def main():
         st.metric("System", "🟢 Online")
     
     with col6:
-        if st.button("🚪 Logout", key="logout_simple"):
-            st.session_state['authenticated'] = False
-            st.rerun()
+        st.markdown("**🚀 Ready**")
     
     st.markdown("---")
     

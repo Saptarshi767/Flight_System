@@ -5,7 +5,6 @@ Navigation component for the dashboard
 import streamlit as st
 import numpy as np
 from datetime import datetime, timedelta
-from dashboard.components.auth import logout, get_current_user, get_current_user_role
 
 def setup_navigation():
     """Setup modern, compact sidebar navigation"""
@@ -14,15 +13,7 @@ def setup_navigation():
         with st.sidebar:
             # Simple header first
             st.markdown("# ✈️ Flight Control")
-            
-            # User info
-            user = get_current_user()
-            role = get_current_user_role()
-            
-            if user and role:
-                st.markdown(f"**{user}** • {role}")
-                if st.button("🚪 Logout", key="logout_btn"):
-                    logout()
+            st.markdown("*AI-Powered Flight Analysis*")
             
             st.markdown("---")
             

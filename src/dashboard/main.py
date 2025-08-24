@@ -16,7 +16,6 @@ sys.path.insert(0, str(src_path))
 # Import with error handling
 try:
     from dashboard.page_modules import home, delay_analysis, congestion_analysis, schedule_impact, nlp_interface
-    from dashboard.components.auth import authenticate_user
     from dashboard.components.navigation import setup_navigation
     from dashboard.utils.session import initialize_session_state
     IMPORTS_SUCCESSFUL = True
@@ -62,10 +61,6 @@ def main():
     try:
         # Initialize session state
         initialize_session_state()
-        
-        # Authentication
-        if not authenticate_user():
-            return
         
         # Setup sidebar navigation
         setup_navigation()
