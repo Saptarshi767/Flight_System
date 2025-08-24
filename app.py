@@ -132,13 +132,13 @@ def main():
             delta="-5"
         )
     
-    # Charts
-    st.markdown("### 📈 Performance Analytics")
+    # Delay Analysis Section
+    st.markdown("### 📈 Delay Analysis by Airport")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        # Delay distribution chart
+        # Hourly delay patterns for selected airport
         hours = list(range(24))
         if 'hourly_delays' in demo_data and selected_airport in demo_data['hourly_delays']:
             delays = demo_data['hourly_delays'][selected_airport]
@@ -148,25 +148,56 @@ def main():
         fig = px.line(
             x=hours, 
             y=delays,
-            title=f"Hourly Delay Patterns - {airport_info['name']}",
+            title=f"Hourly Delay Patterns - {airport_info['name']} Airport ({selected_airport})",
             labels={'x': 'Hour of Day', 'y': 'Average Delay (minutes)'}
         )
         fig.update_layout(
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(tickmode='linear', tick0=0, dtick=2)
+            xaxis=dict(tickmode='linear', tick0=0, dtick=2),
+            showlegend=False
         )
+        fig.update_traces(line=dict(color='#2a5298', width=3))
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        # Airport comparison
+        # Average delay comparison across airports
+        airport_names = [airports_data[code]['name'] for code in airports_data.keys()]
+        airport_codes = list(airports_data.keys())
+        avg_delays = [airports_data[code]['avg_delay'] for code in airports_data.keys()]
+        
+        # Create labels with airport names only (no company names)
+        airport_labels = [f"{airports_data[code]['name']}\n({code})" for code in airports_data.keys()]
+        
+        fig = px.bar(
+            x=airport_labels,
+            y=avg_delays,
+            title="Average Delay Comparison by Airport",
+            labels={'x': 'Airport', 'y': 'Average Delay (minutes)'},
+            color=avg_delays,
+            color_continuous_scale='RdYlBu_r'
+        )
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            xaxis_tickangle=-45
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Additional delay analysis
+    st.markdown("### 📊 Detailed Delay Analysis")
+    
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        # On-time performance by airport
         airport_names = [airports_data[code]['name'] for code in airports_data.keys()]
         ontime_rates = [airports_data[code]['ontime_rate'] for code in airports_data.keys()]
         
         fig = px.bar(
             x=airport_names,
             y=ontime_rates,
-            title="On-Time Performance Comparison",
+            title="On-Time Performance by Airport",
             labels={'x': 'Airport', 'y': 'On-Time Rate (%)'},
             color=ontime_rates,
             color_continuous_scale='RdYlGn'
@@ -176,6 +207,66 @@ def main():
             paper_bgcolor='rgba(0,0,0,0)'
         )
         st.plotly_chart(fig, use_container_width=True)
+    
+    with col4:
+        # Delay severity distribution for selected airport
+        delay_categories = ['On-Time (0-5 min)', 'Minor Delay (5-15 min)', 'Moderate Delay (15-30 min)', 'Major Delay (30+ min)']
+        
+        # Calculate distribution based on airport performance
+        ontime_rate = airport_info['ontime_rate']
+        minor_delay = (100 - ontime_rate) * 0.5
+        moderate_delay = (100 - ontime_rate) * 0.3
+        major_delay = (100 - ontime_rate) * 0.2
+        
+        delay_percentages = [ontime_rate, minor_delay, moderate_delay, major_delay]
+        
+        fig = px.pie(
+            values=delay_percentages,
+            names=delay_categories,
+            title=f"Delay Distribution - {airport_info['name']} Airport",
+            color_discrete_sequence=['#28a745', '#ffc107', '#fd7e14', '#dc3545']
+        )
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Airport delay summary table
+    st.markdown("### 📋 Airport Delay Summary")
+    
+    # Create a comprehensive delay analysis table with airport names only
+    delay_summary_data = []
+    for code, info in airports_data.items():
+        delay_summary_data.append({
+            'Airport Code': code,
+            'Airport Name': info['name'],
+            'Daily Flights': f"{info['daily_flights']:,}",
+            'Average Delay (min)': f"{info['avg_delay']:.1f}",
+            'On-Time Rate (%)': f"{info['ontime_rate']:.1f}%",
+            'Status': info.get('status', 'Normal'),
+            'Performance Rating': '⭐⭐⭐⭐⭐' if info['ontime_rate'] > 85 else '⭐⭐⭐⭐' if info['ontime_rate'] > 75 else '⭐⭐⭐' if info['ontime_rate'] > 65 else '⭐⭐'
+        })
+    
+    delay_df = pd.DataFrame(delay_summary_data)
+    
+    # Style the dataframe
+    st.dataframe(
+        delay_df,
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Best and worst performing airports
+    col_best, col_worst = st.columns(2)
+    
+    with col_best:
+        best_airport = max(airports_data.items(), key=lambda x: x[1]['ontime_rate'])
+        st.success(f"🏆 **Best Performance**: {best_airport[1]['name']} ({best_airport[0]}) - {best_airport[1]['ontime_rate']:.1f}% on-time")
+    
+    with col_worst:
+        worst_airport = min(airports_data.items(), key=lambda x: x[1]['ontime_rate'])
+        st.error(f"⚠️ **Needs Attention**: {worst_airport[1]['name']} ({worst_airport[0]}) - {worst_airport[1]['ontime_rate']:.1f}% on-time")
     
     # Status indicators
     st.markdown("### 🚦 Airport Status")
