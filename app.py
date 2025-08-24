@@ -41,17 +41,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def generate_sample_data():
-    """Generate sample flight data for demonstration"""
-    airports = {
-        'BOM': {'name': 'Mumbai', 'flights': 950, 'delay': 18.3, 'ontime': 72.1},
-        'DEL': {'name': 'Delhi', 'flights': 1200, 'delay': 22.7, 'ontime': 68.5},
-        'BLR': {'name': 'Bangalore', 'flights': 680, 'delay': 8.9, 'ontime': 85.3},
-        'MAA': {'name': 'Chennai', 'flights': 520, 'delay': 15.2, 'ontime': 76.8},
-        'CCU': {'name': 'Kolkata', 'flights': 380, 'delay': 11.4, 'ontime': 81.2},
-        'HYD': {'name': 'Hyderabad', 'flights': 420, 'delay': 9.6, 'ontime': 83.7}
-    }
-    return airports
+def load_demo_data():
+    """Load demo data from JSON file or generate if not exists"""
+    try:
+        import json
+        with open('demo_data.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Fallback to basic data if demo_data.json doesn't exist
+        return {
+            'airports': {
+                'BOM': {'name': 'Mumbai', 'daily_flights': 950, 'avg_delay': 18.3, 'ontime_rate': 72.1, 'status': 'Moderate', 'status_color': '🟡'},
+                'DEL': {'name': 'Delhi', 'daily_flights': 1200, 'avg_delay': 22.7, 'ontime_rate': 68.5, 'status': 'High Congestion', 'status_color': '🔴'},
+                'BLR': {'name': 'Bangalore', 'daily_flights': 680, 'avg_delay': 8.9, 'ontime_rate': 85.3, 'status': 'Normal', 'status_color': '🟢'},
+                'MAA': {'name': 'Chennai', 'daily_flights': 520, 'avg_delay': 15.2, 'ontime_rate': 76.8, 'status': 'Moderate', 'status_color': '🟡'},
+                'CCU': {'name': 'Kolkata', 'daily_flights': 380, 'avg_delay': 11.4, 'ontime_rate': 81.2, 'status': 'Normal', 'status_color': '🟢'},
+                'HYD': {'name': 'Hyderabad', 'daily_flights': 420, 'avg_delay': 9.6, 'ontime_rate': 83.7, 'status': 'Normal', 'status_color': '🟢'}
+            },
+            'hourly_delays': {}
+        }
 
 def main():
     # Header
@@ -65,8 +73,9 @@ def main():
     # Sidebar
     st.sidebar.markdown("### 🎛️ Flight Control Center")
     
-    # Generate sample data
-    airports_data = generate_sample_data()
+    # Load demo data
+    demo_data = load_demo_data()
+    airports_data = demo_data['airports']
     
     # Filters
     selected_airport = st.sidebar.selectbox(
@@ -97,26 +106,26 @@ def main():
     with col1:
         st.metric(
             label="Total Flights",
-            value=f"{airport_info['flights']:,}",
+            value=f"{airport_info['daily_flights']:,}",
             delta="12 vs yesterday"
         )
     
     with col2:
         st.metric(
             label="Average Delay",
-            value=f"{airport_info['delay']:.1f} min",
+            value=f"{airport_info['avg_delay']:.1f} min",
             delta="-2.3 min"
         )
     
     with col3:
         st.metric(
             label="On-Time Performance",
-            value=f"{airport_info['ontime']:.1f}%",
+            value=f"{airport_info['ontime_rate']:.1f}%",
             delta="1.2%"
         )
     
     with col4:
-        critical_flights = int(airport_info['flights'] * 0.15)
+        critical_flights = int(airport_info['daily_flights'] * 0.15)
         st.metric(
             label="Critical Flights",
             value=f"{critical_flights}",
@@ -131,7 +140,10 @@ def main():
     with col1:
         # Delay distribution chart
         hours = list(range(24))
-        delays = [np.random.normal(airport_info['delay'], 5) for _ in hours]
+        if 'hourly_delays' in demo_data and selected_airport in demo_data['hourly_delays']:
+            delays = demo_data['hourly_delays'][selected_airport]
+        else:
+            delays = [np.random.normal(airport_info['avg_delay'], 5) for _ in hours]
         
         fig = px.line(
             x=hours, 
@@ -141,14 +153,15 @@ def main():
         )
         fig.update_layout(
             plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
+            paper_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(tickmode='linear', tick0=0, dtick=2)
         )
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         # Airport comparison
         airport_names = [airports_data[code]['name'] for code in airports_data.keys()]
-        ontime_rates = [airports_data[code]['ontime'] for code in airports_data.keys()]
+        ontime_rates = [airports_data[code]['ontime_rate'] for code in airports_data.keys()]
         
         fig = px.bar(
             x=airport_names,
@@ -170,15 +183,17 @@ def main():
     status_cols = st.columns(3)
     
     with status_cols[0]:
-        if airport_info['ontime'] > 80:
-            st.success(f"🟢 {airport_info['name']} - Normal Operations")
-        elif airport_info['ontime'] > 70:
-            st.warning(f"🟡 {airport_info['name']} - Moderate Delays")
+        status_color = airport_info.get('status_color', '🟢')
+        status_text = airport_info.get('status', 'Normal')
+        if airport_info['ontime_rate'] > 80:
+            st.success(f"{status_color} {airport_info['name']} - {status_text}")
+        elif airport_info['ontime_rate'] > 70:
+            st.warning(f"{status_color} {airport_info['name']} - {status_text}")
         else:
-            st.error(f"🔴 {airport_info['name']} - High Congestion")
+            st.error(f"{status_color} {airport_info['name']} - {status_text}")
     
     with status_cols[1]:
-        st.info(f"📊 Daily Capacity: {airport_info['flights']} flights")
+        st.info(f"📊 Daily Capacity: {airport_info['daily_flights']} flights")
     
     with status_cols[2]:
         weather_status = np.random.choice(["Clear", "Cloudy", "Rainy"], p=[0.6, 0.3, 0.1])
