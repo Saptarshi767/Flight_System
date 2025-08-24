@@ -1,0 +1,77 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ template.name }}</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .section { margin-bottom: 30px; }
+        .chart { text-align: center; margin: 20px 0; }
+        .chart img { max-width: 100%; height: auto; }
+        .metadata { background-color: #f5f5f5; padding: 15px; border-radius: 5px; }
+        .recommendations { background-color: #e8f4fd; padding: 15px; border-radius: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ template.name }}</h1>
+        <p>Generated on: {{ generated_at }}</p>
+        <p>Report ID: {{ metadata.report_id }}</p>
+    </div>
+    
+    <div class="metadata">
+        <h2>Report Metadata</h2>
+        <p><strong>Stakeholder:</strong> {{ request.stakeholder_type.value.replace('_', ' ').title() }}</p>
+        <p><strong>Report Type:</strong> {{ request.report_type.value.replace('_', ' ').title() }}</p>
+        <p><strong>Airports:</strong> {{ metadata.airports_included | join(', ') }}</p>
+        <p><strong>Total Flights Analyzed:</strong> {{ metadata.total_flights_analyzed }}</p>
+        {% if metadata.confidence_score %}
+        <p><strong>Confidence Score:</strong> {{ "%.2f"|format(metadata.confidence_score) }}</p>
+        {% endif %}
+    </div>
+    
+    {% for section in template.sections %}
+    <div class="section">
+        <h2>{{ section.title }}</h2>
+        <p>{{ section.content }}</p>
+        
+        {% for chart_config in section.charts %}
+        {% if charts[chart_config.data_source] %}
+        <div class="chart">
+            <h3>{{ chart_config.title }}</h3>
+            <img src="{{ charts[chart_config.data_source] }}" alt="{{ chart_config.title }}">
+        </div>
+        {% endif %}
+        {% endfor %}
+        
+        {% if section.recommendations %}
+        <div class="recommendations">
+            <h3>Recommendations</h3>
+            <ul>
+            {% for rec in section.recommendations %}
+                <li>{{ rec }}</li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    
+    {% if analysis_data %}
+    <div class="section">
+        <h2>Analysis Summary</h2>
+        {% for key, value in analysis_data.items() %}
+        {% if key not in ['hourly_delays', 'delay_causes', 'traffic_density', 'optimal_times', 'network_impact'] %}
+        <p><strong>{{ key.replace('_', ' ').title() }}:</strong> {{ value }}</p>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+</body>
+</html>
+        

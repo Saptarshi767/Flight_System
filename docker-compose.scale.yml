@@ -1,0 +1,415 @@
+version: '3.8'
+
+services:
+  # Load Balancer (HAProxy)
+  load-balancer:
+    image: haproxy:2.8-alpine
+    container_name: flight-analysis-lb
+    ports:
+      - "80:80"
+      - "8404:8404"  # HAProxy stats
+    volumes:
+      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - api-1
+      - api-2
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8404/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Service Instances (Scalable)
+  api-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flight-api-1
+    environment:
+      - DATABASE_URL=postgresql://flight_user:flight_pass@postgres-primary:5432/flight_analysis
+      - REDIS_URL=redis://redis-primary:6379/0
+      - INFLUXDB_URL=http://influxdb:8086
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_INSTANCE_ID=api-1
+      - API_PORT=8000
+    depends_on:
+      - postgres-primary
+      - redis-primary
+      - influxdb
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  api-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flight-api-2
+    environment:
+      - DATABASE_URL=postgresql://flight_user:flight_pass@postgres-primary:5432/flight_analysis
+      - REDIS_URL=redis://redis-primary:6379/0
+      - INFLUXDB_URL=http://influxdb:8086
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_INSTANCE_ID=api-2
+      - API_PORT=8000
+    depends_on:
+      - postgres-primary
+      - redis-primary
+      - influxdb
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Database Primary (Master)
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: flight-postgres-primary
+    environment:
+      - POSTGRES_DB=flight_analysis
+      - POSTGRES_USER=flight_user
+      - POSTGRES_PASSWORD=flight_pass
+      - POSTGRES_REPLICATION_MODE=master
+      - POSTGRES_REPLICATION_USER=replicator
+      - POSTGRES_REPLICATION_PASSWORD=replicator_pass
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./config/postgresql-primary.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flight_user -d flight_analysis"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # Database Read Replica
+  postgres-replica:
+    image: postgres:15-alpine
+    container_name: flight-postgres-replica
+    environment:
+      - POSTGRES_DB=flight_analysis
+      - POSTGRES_USER=flight_user
+      - POSTGRES_PASSWORD=flight_pass
+      - POSTGRES_REPLICATION_MODE=slave
+      - POSTGRES_REPLICATION_USER=replicator
+      - POSTGRES_REPLICATION_PASSWORD=replicator_pass
+      - POSTGRES_MASTER_SERVICE=postgres-primary
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./config/postgresql-replica.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5433:5432"
+    depends_on:
+      - postgres-primary
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flight_user -d flight_analysis"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Primary
+  redis-primary:
+    image: redis:7-alpine
+    container_name: flight-redis-primary
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis_primary_data:/data
+      - ./config/redis-primary.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Redis Replica
+  redis-replica:
+    image: redis:7-alpine
+    container_name: flight-redis-replica
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-primary 6379
+    volumes:
+      - redis_replica_data:/data
+      - ./config/redis-replica.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6380:6379"
+    depends_on:
+      - redis-primary
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # InfluxDB for Time Series Data
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: flight-influxdb
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=admin_password
+      - DOCKER_INFLUXDB_INIT_ORG=flight_analysis
+      - DOCKER_INFLUXDB_INIT_BUCKET=flight_metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=flight_analysis_token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    ports:
+      - "8086:8086"
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Streamlit Dashboard (Scalable)
+  dashboard-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: flight-dashboard-1
+    environment:
+      - API_BASE_URL=http://load-balancer
+      - DASHBOARD_INSTANCE_ID=dashboard-1
+    ports:
+      - "8501:8501"
+    depends_on:
+      - load-balancer
+    networks:
+      - flight-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Worker Services for Background Tasks
+  worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: flight-worker-1
+    environment:
+      - DATABASE_URL=postgresql://flight_user:flight_pass@postgres-primary:5432/flight_analysis
+      - REDIS_URL=redis://redis-primary:6379/0
+      - INFLUXDB_URL=http://influxdb:8086
+      - WORKER_INSTANCE_ID=worker-1
+      - CELERY_BROKER_URL=redis://redis-primary:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis-primary:6379/2
+    depends_on:
+      - postgres-primary
+      - redis-primary
+      - influxdb
+    networks:
+      - flight-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: flight-worker-2
+    environment:
+      - DATABASE_URL=postgresql://flight_user:flight_pass@postgres-primary:5432/flight_analysis
+      - REDIS_URL=redis://redis-primary:6379/0
+      - INFLUXDB_URL=http://influxdb:8086
+      - WORKER_INSTANCE_ID=worker-2
+      - CELERY_BROKER_URL=redis://redis-primary:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis-primary:6379/2
+    depends_on:
+      - postgres-primary
+      - redis-primary
+      - influxdb
+    networks:
+      - flight-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Monitoring and Metrics
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: flight-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - flight-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: flight-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - flight-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+networks:
+  flight-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_primary_data:
+    driver: local
+  postgres_replica_data:
+    driver: local
+  redis_primary_data:
+    driver: local
+  redis_replica_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  influxdb_config:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

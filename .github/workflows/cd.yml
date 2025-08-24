@@ -1,0 +1,395 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Build and Push Docker Images
+  build-and-push:
+    runs-on: ubuntu-latest
+    name: Build and Push Images
+    permissions:
+      contents: read
+      packages: write
+      
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          
+    - name: Build and push API image
+      id: build-api
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: production
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ steps.meta.outputs.version }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+        
+    - name: Build and push Dashboard image
+      id: build-dashboard
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.streamlit
+        target: production
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-dashboard:${{ steps.meta.outputs.version }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+        
+    - name: Build and push Worker image
+      id: build-worker
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.worker
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:${{ steps.meta.outputs.version }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+        
+    - name: Build and push Scheduler image
+      id: build-scheduler
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.scheduler
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-scheduler:${{ steps.meta.outputs.version }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+  # Security Scan of Images
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan Images
+    needs: build-and-push
+    
+    steps:
+    - name: Run Trivy vulnerability scanner on API image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ needs.build-and-push.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-api-results.sarif'
+        
+    - name: Run Trivy vulnerability scanner on Dashboard image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-dashboard:${{ needs.build-and-push.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-dashboard-results.sarif'
+        
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-api-results.sarif'
+
+  # Deploy to Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [build-and-push, security-scan]
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: https://staging.flightanalysis.example.com
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+        
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+        kubectl config current-context
+        
+    - name: Deploy to staging
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Update image tags in deployment files
+        sed -i "s|IMAGE_TAG|${{ needs.build-and-push.outputs.image-tag }}|g" k8s/staging/*.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/staging/
+        
+        # Wait for deployment to complete
+        kubectl rollout status deployment/flight-analysis-api -n staging --timeout=600s
+        kubectl rollout status deployment/flight-analysis-dashboard -n staging --timeout=600s
+        kubectl rollout status deployment/flight-analysis-worker -n staging --timeout=600s
+        
+    - name: Run smoke tests
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Get service URLs
+        API_URL=$(kubectl get service flight-analysis-api -n staging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        DASHBOARD_URL=$(kubectl get service flight-analysis-dashboard -n staging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        # Wait for services to be ready
+        sleep 60
+        
+        # Test API health
+        curl -f "http://$API_URL/health" || exit 1
+        
+        # Test dashboard health
+        curl -f "http://$DASHBOARD_URL/_stcore/health" || exit 1
+        
+        echo "✅ Staging deployment successful!"
+
+  # Deploy to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    needs: [build-and-push, security-scan, deploy-staging]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://flightanalysis.example.com
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+        
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+        kubectl config current-context
+        
+    - name: Create backup
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Create database backup
+        kubectl exec -n production deployment/postgres -- pg_dump -U user flightdb > backup-$(date +%Y%m%d-%H%M%S).sql
+        
+        # Store backup in artifact
+        echo "Backup created: backup-$(date +%Y%m%d-%H%M%S).sql"
+        
+    - name: Deploy to production
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Update image tags in deployment files
+        sed -i "s|IMAGE_TAG|${{ needs.build-and-push.outputs.image-tag }}|g" k8s/production/*.yaml
+        
+        # Apply Kubernetes manifests with rolling update
+        kubectl apply -f k8s/production/
+        
+        # Wait for deployment to complete
+        kubectl rollout status deployment/flight-analysis-api -n production --timeout=900s
+        kubectl rollout status deployment/flight-analysis-dashboard -n production --timeout=900s
+        kubectl rollout status deployment/flight-analysis-worker -n production --timeout=900s
+        
+    - name: Run production smoke tests
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Get service URLs
+        API_URL=$(kubectl get service flight-analysis-api -n production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        DASHBOARD_URL=$(kubectl get service flight-analysis-dashboard -n production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        # Wait for services to be ready
+        sleep 120
+        
+        # Test API health
+        curl -f "https://$API_URL/health" || exit 1
+        
+        # Test dashboard health
+        curl -f "https://$DASHBOARD_URL/_stcore/health" || exit 1
+        
+        # Test API endpoints
+        curl -f "https://$API_URL/api/v1/data/flights?limit=1" || exit 1
+        
+        echo "✅ Production deployment successful!"
+        
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      if: success()
+      with:
+        status: success
+        text: "🚀 Production deployment successful! Version: ${{ needs.build-and-push.outputs.image-tag }}"
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        
+    - name: Notify deployment failure
+      uses: 8398a7/action-slack@v3
+      if: failure()
+      with:
+        status: failure
+        text: "❌ Production deployment failed! Please check the logs."
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Rollback (Manual trigger)
+  rollback:
+    runs-on: ubuntu-latest
+    name: Rollback Deployment
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'rollback'
+    environment:
+      name: production
+      
+    steps:
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+        
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+        
+    - name: Rollback deployment
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Rollback to previous version
+        kubectl rollout undo deployment/flight-analysis-api -n production
+        kubectl rollout undo deployment/flight-analysis-dashboard -n production
+        kubectl rollout undo deployment/flight-analysis-worker -n production
+        
+        # Wait for rollback to complete
+        kubectl rollout status deployment/flight-analysis-api -n production --timeout=600s
+        kubectl rollout status deployment/flight-analysis-dashboard -n production --timeout=600s
+        kubectl rollout status deployment/flight-analysis-worker -n production --timeout=600s
+        
+        echo "✅ Rollback completed successfully!"
+
+  # Performance Testing in Production
+  performance-test:
+    runs-on: ubuntu-latest
+    name: Performance Test
+    needs: deploy-production
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install locust requests
+        
+    - name: Run performance tests
+      run: |
+        # Run Locust performance tests against production
+        locust -f tests/performance/locustfile.py \
+          --host=https://flightanalysis.example.com \
+          --users=50 \
+          --spawn-rate=5 \
+          --run-time=5m \
+          --headless \
+          --html=performance-report.html
+          
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report
+        path: performance-report.html
+
+  # Update Documentation
+  update-docs:
+    runs-on: ubuntu-latest
+    name: Update Documentation
+    needs: deploy-production
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Generate API documentation
+      run: |
+        # Generate OpenAPI spec
+        python -c "
+        from src.api.main import app
+        import json
+        with open('openapi.json', 'w') as f:
+            json.dump(app.openapi(), f, indent=2)
+        "
+        
+    - name: Update deployment documentation
+      run: |
+        # Update version in documentation
+        sed -i "s/Version: .*/Version: ${{ github.ref_name }}/" DEPLOYMENT.md
+        
+    - name: Commit documentation updates
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add openapi.json DEPLOYMENT.md
+        git commit -m "Update documentation for ${{ github.ref_name }}" || exit 0
+        git push

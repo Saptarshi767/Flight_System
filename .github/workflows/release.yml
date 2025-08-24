@@ -1,0 +1,376 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # Create GitHub Release
+  create-release:
+    runs-on: ubuntu-latest
+    name: Create Release
+    
+    outputs:
+      release-id: ${{ steps.create-release.outputs.id }}
+      upload-url: ${{ steps.create-release.outputs.upload_url }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get previous tag
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        
+        if [ -z "$PREVIOUS_TAG" ]; then
+          # First release
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+        else
+          # Generate changelog since last tag
+          CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+        fi
+        
+        # Save changelog to file
+        echo "## Changes" > CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "$CHANGELOG" >> CHANGELOG.md
+        
+        # Set output for use in release
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        cat CHANGELOG.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create Release
+      id: create-release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Flight Analysis System ${{ github.ref_name }}
+        body: |
+          # Flight Scheduling Analysis System ${{ github.ref_name }}
+          
+          ## 🚀 What's New
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ## 📦 Docker Images
+          
+          - API: `ghcr.io/${{ github.repository }}-api:${{ github.ref_name }}`
+          - Dashboard: `ghcr.io/${{ github.repository }}-dashboard:${{ github.ref_name }}`
+          - Worker: `ghcr.io/${{ github.repository }}-worker:${{ github.ref_name }}`
+          - Scheduler: `ghcr.io/${{ github.repository }}-scheduler:${{ github.ref_name }}`
+          
+          ## 🔧 Installation
+          
+          ```bash
+          # Download and extract release
+          wget https://github.com/${{ github.repository }}/archive/${{ github.ref_name }}.tar.gz
+          tar -xzf ${{ github.ref_name }}.tar.gz
+          cd flight-scheduling-analysis-${{ github.ref_name }}
+          
+          # Deploy with Docker Compose
+          ./scripts/deploy.sh production
+          ```
+          
+          ## 📚 Documentation
+          
+          - [Deployment Guide](DEPLOYMENT.md)
+          - [API Documentation](API_IMPLEMENTATION_SUMMARY.md)
+          - [User Guide](README.md)
+          
+          ## 🐛 Bug Reports
+          
+          Please report any issues on our [GitHub Issues](https://github.com/${{ github.repository }}/issues) page.
+        draft: false
+        prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+
+  # Build Release Artifacts
+  build-artifacts:
+    runs-on: ubuntu-latest
+    name: Build Release Artifacts
+    needs: create-release
+    
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        
+    - name: Build standalone executable
+      run: |
+        # Create standalone executable for CLI tools
+        pyinstaller --onefile \
+          --name flight-analysis-cli-${{ matrix.os }}-${{ matrix.arch }} \
+          --add-data "src:src" \
+          --hidden-import src.utils.logging_config \
+          --hidden-import src.utils.metrics \
+          --hidden-import src.utils.alerts \
+          scripts/cli.py
+          
+    - name: Create distribution package
+      run: |
+        # Create distribution package
+        mkdir -p dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}
+        
+        # Copy application files
+        cp -r src/ dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp -r config/ dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp -r scripts/ dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp requirements.txt dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp docker-compose*.yml dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp Dockerfile* dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp *.md dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        cp .env.example dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        
+        # Copy executable if it exists
+        if [ -f "dist/flight-analysis-cli-${{ matrix.os }}-${{ matrix.arch }}" ]; then
+          cp dist/flight-analysis-cli-${{ matrix.os }}-${{ matrix.arch }} dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        fi
+        
+        # Create archive
+        cd dist
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          zip -r flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.zip flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        else
+          tar -czf flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}/
+        fi
+        
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload-url }}
+        asset_path: ./dist/flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.os == 'windows' && 'zip' || 'tar.gz' }}
+        asset_name: flight-analysis-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.os == 'windows' && 'zip' || 'tar.gz' }}
+        asset_content_type: application/${{ matrix.os == 'windows' && 'zip' || 'gzip' }}
+
+  # Generate Documentation
+  generate-docs:
+    runs-on: ubuntu-latest
+    name: Generate Documentation
+    needs: create-release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install sphinx sphinx-rtd-theme
+        
+    - name: Generate API documentation
+      run: |
+        # Generate OpenAPI specification
+        python -c "
+        import sys
+        sys.path.append('src')
+        from api.main import app
+        import json
+        
+        spec = app.openapi()
+        spec['info']['version'] = '${{ github.ref_name }}'
+        
+        with open('openapi.json', 'w') as f:
+            json.dump(spec, f, indent=2)
+        "
+        
+    - name: Generate user documentation
+      run: |
+        # Create comprehensive documentation package
+        mkdir -p docs-package
+        
+        # Copy documentation files
+        cp README.md docs-package/
+        cp DEPLOYMENT.md docs-package/
+        cp API_IMPLEMENTATION_SUMMARY.md docs-package/
+        cp ML_IMPLEMENTATION_SUMMARY.md docs-package/
+        cp TASK_4_IMPLEMENTATION_SUMMARY.md docs-package/
+        cp openapi.json docs-package/
+        
+        # Create installation guide
+        cat > docs-package/INSTALLATION.md << 'EOF'
+        # Installation Guide
+        
+        ## Quick Start
+        
+        1. Download the release package for your platform
+        2. Extract the archive
+        3. Follow the deployment guide in DEPLOYMENT.md
+        
+        ## System Requirements
+        
+        - Docker and Docker Compose
+        - 8GB RAM minimum, 16GB recommended
+        - 20GB free disk space
+        - Python 3.9+ (for development)
+        
+        ## Support
+        
+        For support, please visit our GitHub repository or contact the development team.
+        EOF
+        
+        # Create archive
+        tar -czf flight-analysis-docs-${{ github.ref_name }}.tar.gz docs-package/
+        
+    - name: Upload Documentation
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload-url }}
+        asset_path: ./flight-analysis-docs-${{ github.ref_name }}.tar.gz
+        asset_name: flight-analysis-docs-${{ github.ref_name }}.tar.gz
+        asset_content_type: application/gzip
+
+  # Publish to Package Registries
+  publish-packages:
+    runs-on: ubuntu-latest
+    name: Publish Packages
+    needs: create-release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+        
+    - name: Build Python package
+      run: |
+        # Create setup.py for the package
+        cat > setup.py << 'EOF'
+        from setuptools import setup, find_packages
+        
+        with open("README.md", "r", encoding="utf-8") as fh:
+            long_description = fh.read()
+        
+        with open("requirements.txt", "r", encoding="utf-8") as fh:
+            requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+        
+        setup(
+            name="flight-scheduling-analysis",
+            version="${{ github.ref_name }}".lstrip("v"),
+            author="Flight Analysis Team",
+            author_email="team@flightanalysis.com",
+            description="AI-powered flight scheduling analysis system",
+            long_description=long_description,
+            long_description_content_type="text/markdown",
+            url="https://github.com/${{ github.repository }}",
+            packages=find_packages(where="src"),
+            package_dir={"": "src"},
+            classifiers=[
+                "Development Status :: 4 - Beta",
+                "Intended Audience :: Developers",
+                "License :: OSI Approved :: MIT License",
+                "Operating System :: OS Independent",
+                "Programming Language :: Python :: 3",
+                "Programming Language :: Python :: 3.9",
+                "Programming Language :: Python :: 3.10",
+                "Programming Language :: Python :: 3.11",
+            ],
+            python_requires=">=3.9",
+            install_requires=requirements,
+            entry_points={
+                "console_scripts": [
+                    "flight-analysis=cli:main",
+                ],
+            },
+        )
+        EOF
+        
+        # Build package
+        python -m build
+        
+    - name: Publish to PyPI
+      if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'rc')
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        twine upload dist/*
+
+  # Notify Release
+  notify-release:
+    runs-on: ubuntu-latest
+    name: Notify Release
+    needs: [create-release, build-artifacts, generate-docs, publish-packages]
+    if: always()
+    
+    steps:
+    - name: Notify Slack
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: |
+          🎉 Flight Analysis System ${{ github.ref_name }} has been released!
+          
+          📦 Download: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          🐳 Docker: `ghcr.io/${{ github.repository }}-api:${{ github.ref_name }}`
+          📚 Documentation: Included in release assets
+          
+          ${{ job.status == 'success' && '✅ All release tasks completed successfully!' || '❌ Some release tasks failed. Please check the workflow.' }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        
+    - name: Notify Teams
+      if: always()
+      uses: skitionek/notify-microsoft-teams@master
+      with:
+        webhook_url: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        title: "Flight Analysis System Release"
+        message: |
+          **Version:** ${{ github.ref_name }}
+          **Status:** ${{ job.status == 'success' && '✅ Success' || '❌ Failed' }}
+          **Download:** [GitHub Releases](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})
+          
+          The new version includes the latest features and improvements for flight scheduling analysis.
+        color: ${{ job.status == 'success' && 'good' || 'danger' }}

@@ -2,6 +2,7 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
+pydantic-settings==2.1.0
 python-multipart==0.0.6
 
 # Data Processing
@@ -56,6 +57,15 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
 httpx==0.25.2
+
+# System Monitoring
+psutil==5.9.6
+
+# Reporting and PDF Generation
+reportlab==4.0.7
+jinja2==3.1.2
+fpdf2==2.7.6
+croniter==2.0.1
 
 # Development Tools
 black==23.11.0
